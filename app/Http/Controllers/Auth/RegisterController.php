@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\User;
 use App\Http\Controllers\Controller;
+use DoctrineTest\InstantiatorTestAsset\ExceptionAsset;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Foundation\Auth\RegistersUsers;
@@ -68,5 +69,59 @@ class RegisterController extends Controller
             'email' => $data['email'],
             'password' => Hash::make($data['password']),
         ]);
+    }
+
+    public function register(Request $request)
+    {
+        // https://medium.com/@sadhakbj/laravel-5-5-activate-account-after-registration-using-laravel-notification-fd5dc7fa05ad
+        /** @var User $user */
+        $validatedData = $request->validate([
+            'name'     => 'required|string|max:255',
+            'email'    => 'required|string|email|max:255|unique:users',
+            'password' => 'required|string|min:6|confirmed',
+        ]);
+
+        try {
+            $validatedData['password']        = bcrypt(array_get($validatedData, 'password'));
+            $validatedData['activation_code'] = str_random(30).time();
+            $user = app(User::class)->create($validatedData);
+        } catch (\Exception $exception) {
+            logger()->error($exception);
+
+            return redirect()->back()->with('message', 'Unable to create new user.');
+        }
+        $user->notify(new UserRegisteredSuccessfully($user));
+
+        return redirect()->back()->with('message', 'Successfully created a new account. Please check your email and activate your account.');
+    }
+
+    public function activateUser(string  $activationCode)
+    {
+        try {
+            $user = app(User::class)->where('activation_code', $activationCode)->first();
+            if (!$user) {
+                return "The code does not exist for any user in our system.";
+            }
+            $user->status = 1;
+            $user->activation_code = null;
+            $user->save();
+            auth()->login($user);
+
+        } catch (Exception $e) {
+            logger()->error($e);
+            return "Whoops! something went wrong.";
+        }
+
+        return redirect()->to('/home');
+    }
+
+    function test()
+    {
+        $user = User::create([
+            'name' => 'tuan',
+            'email' => 'vu.huy.tuan@framgia.com',
+            'password' => Hash::make('123456'),
+        ]);
+        $user->notify(new UserRegisteredSuccessfully($user));
     }
 }
